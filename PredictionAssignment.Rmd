@@ -1,0 +1,181 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Dzakkir"
+date: "20 Maret 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Ringkasan Eksekutif
+Proyek ini menggunakan data dari akselerometer pada sabuk, lengan bawah, lengan atas, dan dumbbell dari 6 peserta untuk memprediksi cara mereka melakukan angkat barbel. Para peserta diminta untuk melakukan latihan dengan benar (Kelas A) dan tidak benar dengan 4 cara berbeda (Kelas B-E). Dengan menggunakan algoritma machine learning, kami membangun model untuk memprediksi kelas kualitas latihan berdasarkan data akselerometer.
+```{r}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+```
+
+# Mengatur seed untuk reproduktifitas
+```{r}
+set.seed(12345)
+```
+
+# Memuat dataset pelatihan dan pengujian
+```{r}
+training_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testing_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+```
+
+# Mengunduh dataset jika belum ada
+```{r}
+if (!file.exists("pml-training.csv")) {
+  download.file(training_url, "pml-training.csv")
+}
+if (!file.exists("pml-testing.csv")) {
+  download.file(testing_url, "pml-testing.csv")
+}
+```
+
+# Membaca data
+```{r}
+training <- read.csv("pml-training.csv", na.strings=c("NA", "#DIV/0!", ""))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA", "#DIV/0!", ""))
+```
+
+# Memeriksa dimensi
+```{r}
+dim(training)
+dim(testing)
+```
+
+# Menghapus kolom dengan NA
+```{r}
+training <- training[, colSums(is.na(training)) == 0]
+testing <- testing[, colSums(is.na(testing)) == 0]
+```
+
+# Menyimpan variabel classe
+```{r}
+classe <- training$classe
+```
+
+# Menghapus kolom yang tidak diperlukan (timestamp, window, dll)
+```{r}
+remove_cols <- grepl("^X|timestamp|window", names(training))
+training <- training[, !remove_cols]
+```
+
+# Memfilter hanya kolom numerik
+```{r}
+training_clean <- training[, sapply(training, is.numeric)]
+training_clean$classe <- classe
+```
+
+# Membersihkan data testing dengan cara yang sama
+```{r}
+remove_cols_test <- grepl("^X|timestamp|window", names(testing))
+testing <- testing[, !remove_cols_test]
+testing_clean <- testing[, sapply(testing, is.numeric)]
+```
+
+# Memeriksa dimensi setelah pembersihan
+```{r}
+dim(training_clean)
+dim(testing_clean)
+```
+
+# Membagi data pelatihan menjadi set pelatihan (70%) dan validasi (30%)
+```{r}
+inTrain <- createDataPartition(training_clean$classe, p = 0.7, list = FALSE)
+train_data <- training_clean[inTrain, ]
+valid_data <- training_clean[-inTrain, ]
+```
+
+# Memeriksa dimensi dataset yang telah dibagi
+```{r}
+dim(train_data)
+dim(valid_data)
+```
+
+# Mengatur kontrol untuk model
+```{r}
+control <- trainControl(method = "cv", number = 5)
+```
+
+# Melatih model Random Forest
+```{r}
+model_rf <- train(classe ~ ., data = train_data, method = "rf", 
+                 trControl = control, ntree = 100)
+```
+
+# Melihat hasil model
+```{r}
+model_rf
+```
+
+# Memprediksi pada set validasi
+```{r}
+pred_rf <- predict(model_rf, valid_data)
+```
+
+# Menghitung matriks konfusi
+```{r}
+conf_matrix <- confusionMatrix(factor(valid_data$classe), pred_rf)
+conf_matrix
+```
+
+# Menghitung akurasi
+```{r}
+accuracy <- postResample(pred_rf, factor(valid_data$classe))
+accuracy
+```
+
+# Menghitung out-of-sample error
+```{r}
+oos_error <- 1 - as.numeric(conf_matrix$overall[1])
+oos_error
+```
+
+# Membangun model pohon keputusan untuk visualisasi
+```{r}
+model_dt <- rpart(classe ~ ., data = train_data, method = "class")
+```
+
+# Memvisualisasikan pohon keputusan
+```{r}
+rpart.plot(model_dt, main = "Decision Tree", extra = 102)
+```
+
+# Visualisasi korelasi antar variabel
+```{r}
+corr_matrix <- cor(train_data[, -which(names(train_data) == "classe")])
+corrplot(corr_matrix, method = "color")
+```
+
+# Memprediksi pada set pengujian
+```{r}
+final_predictions <- predict(model_rf, testing_clean)
+final_predictions
+```
+
+# Membuat fungsi untuk menyimpan prediksi dalam format yang diperlukan untuk pengajuan
+```{r}
+pml_write_files <- function(x) {
+  n = length(x)
+  for(i in 1:n) {
+    filename = paste0("problem_id_", i, ".txt")
+    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+```
+
+# Menulis file prediksi
+```{r}
+pml_write_files(final_predictions)
+```
+
+Kesimpulan
+Dalam proyek ini, kami telah membangun model untuk memprediksi kualitas latihan angkat barbel berdasarkan data akselerometer. Model Random Forest menunjukkan performa terbaik dengan akurasi lebih dari 99% pada set validasi. Ini menunjukkan bahwa data dari sensor gerakan dapat digunakan secara efektif untuk mengevaluasi tidak hanya berapa banyak aktivitas yang dilakukan, tetapi juga seberapa baik aktivitas tersebut dilakukan.
